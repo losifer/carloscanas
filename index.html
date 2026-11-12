@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Carlos Cañas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Serif:opsz,wght@8..144,300..500&family=STIX+Two+Text:wght@400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --plum-deep: #220a26;
+      --plum: #66206b;
+      --indigo: #6a3a9e;
+      --ink: #f4ecff;
+      --rule: rgba(244, 236, 255, 0.28);
+      --font-title: "STIX Two Text", Georgia, serif;
+      --font-body: "Roboto Serif", Georgia, serif;
+      --gutter: 1vw; /* 1% padding around content */
+    }
+    @media (max-width: 480px) {
+      :root { --gutter: 16px; } /* 1% is too tight on phones */
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      overflow: hidden;
+      /* Fallback if WebGL is unavailable */
+      background: radial-gradient(120% 120% at 30% 20%, var(--indigo) 0%, var(--plum) 45%, var(--plum-deep) 100%);
+      color: var(--ink);
+      font-family: var(--font-body);
+    }
+    .site-nav {
+      position: fixed;
+      top: 0;
+      left: var(--gutter);
+      right: var(--gutter);
+      z-index: 2;
+      display: flex;
+      justify-content: flex-end;
+      padding: var(--gutter);
+      border-bottom: 1px solid var(--rule);
+    }
+    .site-nav ul {
+      display: flex;
+      align-items: center;
+      list-style: none;
+      font-family: var(--font-body);
+      font-size: 0.8125rem;
+      font-weight: 300;
+      letter-spacing: 0.04em;
+    }
+    .site-nav li + li::before {
+      content: "|";
+      margin: 0 14px;
+      opacity: 0.45;
+    }
+    .site-nav a {
+      color: var(--ink);
+      text-decoration: none;
+      opacity: 0.85;
+      transition: opacity 0.2s;
+    }
+    .site-nav a:hover,
+    .site-nav a:focus-visible {
+      opacity: 1;
+      text-decoration: underline;
+      text-underline-offset: 4px;
+      text-decoration-thickness: 1px;
+    }
+    @media (max-width: 480px) {
+      .site-nav li + li::before { margin: 0 10px; }
+    }
+    canvas#satin {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    .hero {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: var(--gutter);
+      pointer-events: none; /* let the mouse reach the satin */
+    }
+    .hero h1 {
+      font-family: var(--font-title);
+      font-weight: 400;
+      font-size: clamp(3rem, 11vw, 9.5rem);
+      line-height: 1;
+      letter-spacing: -0.01em;
+      text-align: center;
+      color: var(--ink);
+      text-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.15),
+        0 10px 40px rgba(20, 6, 40, 0.55);
+    }
+    .hero .subtitle {
+      margin-top: 0.6em;
+      font-family: var(--font-body);
+      font-weight: 300;
+      font-size: clamp(1rem, 2.2vw, 1.6rem);
+      letter-spacing: 0.06em;
+      text-align: center;
+      color: var(--ink);
+      opacity: 0.85;
+      text-shadow: 0 4px 20px rgba(20, 6, 40, 0.5);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="satin" aria-hidden="true"></canvas>
+  <nav class="site-nav" aria-label="Main">
+    <ul>
+      <li><a href="#about">About me</a></li>
+      <li><a href="#work">Work</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ul>
+  </nav>
+  <main class="hero">
+    <div>
+      <h1>Carlos Cañas</h1>
+      <p class="subtitle">Product Designer</p>
+    </div>
+  </main>
+
+  <script id="vert" type="x-shader/x-vertex">
+    attribute vec2 aPos;
+    void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+  </script>
+
+  <script id="frag" type="x-shader/x-fragment">
+    precision highp float;
+
+    uniform vec2  uRes;     // drawing-buffer size in px
+    uniform float uTime;
+    uniform vec2  uMouse;   // smoothed mouse, in aspect-corrected space (origin = center, y up)
+    uniform float uEnergy;  // 0..1, rises with mouse speed, decays over time
+
+    // Palette: plum → blue-violet satin
+    const vec3 PLUM_DEEP  = vec3(0.13, 0.03, 0.15);
+    const vec3 PLUM       = vec3(0.40, 0.11, 0.42);
+    const vec3 BLUEVIOLET = vec3(0.40, 0.22, 0.62); // soft violet, only a hint of blue
+    const vec3 SHEEN      = vec3(0.95, 0.80, 0.96);
+
+    float hash(vec2 p) {
+      p = fract(p * vec2(123.34, 456.21));
+      p += dot(p, p + 45.32);
+      return fract(p.x * p.y);
+    }
+
+    float noise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      vec2 u = f * f * (3.0 - 2.0 * f);
+      float a = hash(i);
+      float b = hash(i + vec2(1.0, 0.0));
+      float c = hash(i + vec2(0.0, 1.0));
+      float d = hash(i + vec2(1.0, 1.0));
+      return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    }
+
+    float fbm(vec2 p) {
+      float v = 0.0;
+      float a = 0.5;
+      mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
+      for (int i = 0; i < 4; i++) {
+        v += a * noise(p);
+        p = rot * p * 2.02;
+        a *= 0.5;
+      }
+      return v;
+    }
+
+    // Height field of the fabric: long flowing folds, warped by noise and pushed by the cursor.
+    float height(vec2 p) {
+      float t = uTime;
+      vec2 toM = p - uMouse;
+      float d2 = dot(toM, toM);
+      float falloff = exp(-d2 * 3.5);
+
+      // Domain warp for organic drape
+      vec2 q = p;
+      q += 0.45 * vec2(fbm(p * 0.9 + vec2(0.0, t * 0.04)),
+                       fbm(p * 0.9 + vec2(5.2, -t * 0.03)));
+
+      // Cursor gently pushes the cloth outward, more when moving fast
+      q += toM * falloff * (0.35 + 0.9 * uEnergy);
+
+      float h = 0.0;
+      h += 0.55 * sin(q.x * 2.4 + q.y * 1.1 + t * 0.25);
+      h += 0.30 * sin(q.y * 3.3 - q.x * 1.4 - t * 0.18);
+      h += 0.35 * fbm(q * 1.6 + t * 0.02);
+
+      // A soft ripple ring around the cursor
+      h += 0.08 * (0.4 + uEnergy) * sin(sqrt(d2) * 18.0 - t * 3.0) * falloff;
+      return h;
+    }
+
+    void main() {
+      vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+      float e = 1.5 / uRes.y;
+
+      float h  = height(p);
+      float hx = height(p + vec2(e, 0.0));
+      float hy = height(p + vec2(0.0, e));
+      vec2 grad = vec2(hx - h, hy - h) / e;
+      vec3 n = normalize(vec3(-grad * 0.22, 1.0));
+
+      // Light hovers above the cursor
+      vec3 L = normalize(vec3(uMouse - p, 0.75));
+      vec3 V = vec3(0.0, 0.0, 1.0);
+      vec3 H = normalize(L + V);
+
+      float diff = max(dot(n, L), 0.0);
+      float nh   = max(dot(n, H), 0.0);
+
+      // Satin = broad soft sheen + tighter highlight + grazing rim
+      float sheenBroad = pow(nh, 10.0);
+      float sheenTight = pow(nh, 70.0);
+      float rim        = pow(1.0 - n.z, 1.5);
+
+      // Base colour shifts between plum and blue-violet across the folds
+      float k = smoothstep(-0.9, 0.9, h + 0.25 * p.x);
+      vec3 base = mix(PLUM, BLUEVIOLET, k);
+      base = mix(PLUM_DEEP, base, 0.35 + 0.65 * diff);
+
+      vec3 col = base;
+      col += SHEEN * (0.28 * sheenBroad + 0.45 * sheenTight);
+      col += BLUEVIOLET * rim * 0.6;
+
+      // Light falloff from cursor + vignette
+      float dl = length(uMouse - p);
+      col *= 0.75 + 0.35 * exp(-dl * dl * 1.2);
+      vec2 uv = gl_FragCoord.xy / uRes;
+      col *= 0.65 + 0.35 * pow(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), 0.25);
+
+      // Dither to avoid banding in the dark gradients
+      col += (hash(gl_FragCoord.xy + fract(uTime)) - 0.5) / 255.0;
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  </script>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById("satin");
+      const gl = canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false });
+      if (!gl) { canvas.remove(); return; } // CSS gradient fallback stays visible
+
+      function compile(type, src) {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+          console.error(gl.getShaderInfoLog(s));
+          return null;
+        }
+        return s;
+      }
+
+      const vs = compile(gl.VERTEX_SHADER, document.getElementById("vert").textContent);
+      const fs = compile(gl.FRAGMENT_SHADER, document.getElementById("frag").textContent);
+      if (!vs || !fs) { canvas.remove(); return; }
+
+      const prog = gl.createProgram();
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(prog));
+        canvas.remove();
+        return;
+      }
+      gl.useProgram(prog);
+
+      // Full-screen triangle
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(prog, "aPos");
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      const uRes    = gl.getUniformLocation(prog, "uRes");
+      const uTime   = gl.getUniformLocation(prog, "uTime");
+      const uMouse  = gl.getUniformLocation(prog, "uMouse");
+      const uEnergy = gl.getUniformLocation(prog, "uEnergy");
+
+      const DPR_CAP = 1.5;
+      function resize() {
+        const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+        const w = Math.floor(window.innerWidth * dpr);
+        const h = Math.floor(window.innerHeight * dpr);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+          gl.viewport(0, 0, w, h);
+        }
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      // Mouse in aspect-corrected space: origin at center, y up, height spans -0.5..0.5
+      const target = { x: 0.15, y: 0.1 };
+      const mouse  = { x: 0.15, y: 0.1 };
+      let energy = 0;
+      let last = null;
+
+      function toSpace(clientX, clientY) {
+        const h = window.innerHeight;
+        return {
+          x: (clientX - window.innerWidth / 2) / h,
+          y: (h / 2 - clientY) / h,
+        };
+      }
+      function onMove(clientX, clientY) {
+        const p = toSpace(clientX, clientY);
+        if (last) {
+          const speed = Math.hypot(p.x - last.x, p.y - last.y);
+          energy = Math.min(1, energy + speed * 4);
+        }
+        last = p;
+        target.x = p.x;
+        target.y = p.y;
+      }
+      window.addEventListener("pointermove", (e) => onMove(e.clientX, e.clientY), { passive: true });
+      window.addEventListener("touchmove", (e) => {
+        const t = e.touches[0];
+        if (t) onMove(t.clientX, t.clientY);
+      }, { passive: true });
+
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const timeScale = reduceMotion ? 0.25 : 1.0;
+
+      let prev = performance.now();
+      let time = 0;
+      function frame(now) {
+        const dt = Math.min((now - prev) / 1000, 0.05);
+        prev = now;
+        time += dt * timeScale;
+
+        // Smooth follow + energy decay (frame-rate independent)
+        const follow = 1 - Math.exp(-dt * 4);
+        mouse.x += (target.x - mouse.x) * follow;
+        mouse.y += (target.y - mouse.y) * follow;
+        energy *= Math.exp(-dt * 1.5);
+
+        resize();
+        gl.uniform2f(uRes, canvas.width, canvas.height);
+        gl.uniform1f(uTime, time);
+        gl.uniform2f(uMouse, mouse.x, mouse.y);
+        gl.uniform1f(uEnergy, energy);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
